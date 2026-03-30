@@ -230,13 +230,14 @@ with st.sidebar:
         st.success(f"✅ {len(uploaded_files)} document(s) loaded")
 
     st.markdown('<div class="sidebar-label">📝 Chapter Selection</div>', unsafe_allow_html=True)
-    all_chapters = CHAPTERS.get(program, [])
-    default_sel  = [c["code"] for c in all_chapters]
-    selected_ch  = st.multiselect(
+    all_chapters   = CHAPTERS.get(program, [])
+    default_sel    = [c["code"] for c in all_chapters]
+    chapter_labels = {c["code"]: f"{c['code']} — {c['name']}" for c in all_chapters}
+    selected_ch    = st.multiselect(
         "Select chapters to analyze",
-        options=[c["code"] for c in all_chapters],
+        options=list(chapter_labels.keys()),
         default=default_sel,
-        format_option=lambda code: next((f"{code} — {c['name']}" for c in all_chapters if c["code"] == code), code),
+        format_func=lambda code: chapter_labels.get(code, code),
         label_visibility="collapsed"
     )
 
@@ -380,17 +381,21 @@ with tab_analyzer:
     if st.session_state.result:
         result   = st.session_state.result
         facility = st.session_state.facility
-        score    = result.get("overall_score", 0)
+        score    = int(result.get("overall_score", 0) or 0)
         decision = result.get("decision", "Unknown")
 
-        # Color helper
-        def dc(s):
-            d = s.lower()
-            if "accredited" in d and "conditional" not in d and "denied" not in d: return "#00C97B"
-            if "conditional" in d: return "#C9A84C"
-            if "denied" in d: return "#FF4D6D"
-            if s >= 85: return "#00C97B"
-            if s >= 75: return "#C9A84C"
+        # Color helper — takes the decision string only
+        def dc(decision_str):
+            d = decision_str.lower()
+            if "accredited" in d and "conditional" not in d and "denied" not in d:
+                return "#00C97B"
+            if "conditional" in d:
+                return "#C9A84C"
+            if "denied" in d or "preliminary" in d:
+                return "#FF4D6D"
+            # Fallback on numeric score
+            if score >= 85: return "#00C97B"
+            if score >= 75: return "#C9A84C"
             return "#FF4D6D"
 
         decision_color = dc(decision)
@@ -459,7 +464,7 @@ with tab_analyzer:
         if chapter_scores:
             cols = st.columns(2)
             for i, ch in enumerate(chapter_scores):
-                s = ch.get("score", 0)
+                s = int(ch.get("score", 0) or 0)
                 color = "#00C97B" if s >= 85 else "#3D7FFF" if s >= 70 else "#C9A84C" if s >= 50 else "#FF4D6D"
                 with cols[i % 2]:
                     st.markdown(f"""
@@ -777,13 +782,14 @@ with tab_standards:
 
     with col_left:
         st.markdown("**Chapters**")
+        chap_label_map = {
+            c["code"]: f"{c['code']} — {c['name']}" + (" ⚠️" if c.get("esrs", 0) > 0 else "")
+            for c in chapters_exp
+        }
         selected_chap = st.radio(
             "Select chapter",
             options=[c["code"] for c in chapters_exp],
-            format_func=lambda code: next(
-                (f"{code} — {c['name']}" + (" ⚠️" if c.get("esrs", 0) > 0 else "")
-                 for c in chapters_exp if c["code"] == code), code
-            ),
+            format_func=lambda code: chap_label_map.get(code, code),
             label_visibility="collapsed"
         )
 
