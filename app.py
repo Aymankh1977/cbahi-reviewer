@@ -1,5 +1,5 @@
 # app.py — CBAHI Reviewer Main Application
-# DentEdTech™ Platform
+# DentEdTech Platform
 # Deployed via Streamlit Cloud — API key stored in st.secrets
 
 import streamlit as st
@@ -10,19 +10,19 @@ from datetime import datetime, timedelta
 
 from utils.cbahi_data import PROGRAMS, CHAPTERS, ESR_LIST, SCORING_THRESHOLDS, TOTAL_STANDARDS
 from utils.ai_engine import run_analysis, parse_result, extract_text_from_file
-from utils.report_generator import generate_html_report
+from utils.report_generator import generate_html_report, generate_pdf_report
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="CBAHI Reviewer — DentEdTech™",
+    page_title="CBAHI Reviewer — DentEdTech",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
         "Get Help": "mailto:support@dentedtech.com",
-        "About": "CBAHI Reviewer by DentEdTech™ — AI-powered accreditation intelligence platform.",
+        "About": "CBAHI Reviewer by DentEdTech — AI-powered accreditation intelligence platform.",
     },
 )
 
@@ -171,10 +171,10 @@ st.markdown("""
     <div class="cbahi-logo">CR</div>
     <div>
       <div class="cbahi-title">CBAHI Reviewer</div>
-      <div class="cbahi-subtitle">DentEdTech™ · AI Accreditation Intelligence</div>
+      <div class="cbahi-subtitle">DentEdTech · AI Accreditation Intelligence</div>
     </div>
   </div>
-  <div class="cbahi-trademark">© 2025 DentEdTech™ · All Rights Reserved</div>
+  <div class="cbahi-trademark">© 2026 DentEdTech · All Rights Reserved</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -431,20 +431,38 @@ with tab_analyzer:
         # Download Report
         st.markdown("---")
         html_report = generate_html_report(result, facility, st.session_state.program)
-        col_dl1, col_dl2, col_dl3 = st.columns([2, 1, 1])
+        pdf_report  = generate_pdf_report(result, facility, st.session_state.program)
+        fname_base  = f"{facility_name.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}"
+
+        st.markdown("""
+        <div style="background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);
+                    border-radius:12px;padding:18px 22px;margin-bottom:14px;">
+          <div style="font-family:'Playfair Display',serif;font-size:20px;font-weight:700;
+                      margin-bottom:6px;">📥 Download Full Report</div>
+          <div style="font-size:13px;color:#8896b3;">
+            Export your comprehensive compliance report in your preferred format.
+            HTML and PDF contain the full analysis; JSON provides machine-readable data.
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
         with col_dl1:
-            st.markdown(f"""
-            <div style="background:rgba(201,168,76,0.08);border:1px solid rgba(201,168,76,0.3);border-radius:12px;padding:20px;">
-              <div style="font-family:'Playfair Display',serif;font-size:20px;font-weight:700;margin-bottom:6px;">📥 Download Full Report</div>
-              <div style="font-size:13px;color:#8896b3;">Comprehensive HTML report including all findings, chapter scores, ESR matrix, recommendations, and corrective action plan.</div>
-            </div>""", unsafe_allow_html=True)
-        with col_dl2:
             st.download_button(
                 label="📄 Download HTML Report",
                 data=html_report.encode("utf-8"),
-                file_name=f"CBAHI_Report_{facility_name.replace(' ','_')}_{datetime.now().strftime('%Y%m%d')}.html",
+                file_name=f"CBAHI_Report_{fname_base}.html",
                 mime="text/html",
-                use_container_width=True
+                use_container_width=True,
+                help="Opens in any browser. Print to PDF from the browser if needed.",
+            )
+        with col_dl2:
+            st.download_button(
+                label="🖨️ Download PDF Report",
+                data=pdf_report,
+                file_name=f"CBAHI_Report_{fname_base}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                help="Print-ready PDF — ideal for board meetings and committee presentations.",
             )
         with col_dl3:
             st.download_button(
@@ -452,7 +470,8 @@ with tab_analyzer:
                 data=json.dumps(result, indent=2, ensure_ascii=False).encode("utf-8"),
                 file_name=f"CBAHI_Analysis_{datetime.now().strftime('%Y%m%d')}.json",
                 mime="application/json",
-                use_container_width=True
+                use_container_width=True,
+                help="Structured data for integration with quality management systems.",
             )
 
         st.markdown("---")
@@ -880,7 +899,7 @@ with tab_about:
         <div style="background:#131C35;border:1px solid rgba(201,168,76,0.3);border-radius:16px;padding:32px;text-align:center;margin-top:20px;">
           <div class="cbahi-logo" style="width:70px;height:70px;font-size:28px;margin:0 auto 20px;">CR</div>
           <div style="font-family:'Playfair Display',serif;font-size:24px;font-weight:900;color:#F0F4FF;margin-bottom:4px;">CBAHI Reviewer</div>
-          <div style="font-size:13px;color:#C9A84C;letter-spacing:2px;text-transform:uppercase;font-weight:600;margin-bottom:24px;">DentEdTech™</div>
+          <div style="font-size:13px;color:#C9A84C;letter-spacing:2px;text-transform:uppercase;font-weight:600;margin-bottom:24px;">DentEdTech</div>
           <div style="font-size:12px;color:#4a5878;line-height:1.8;">
             Healthcare Education<br>& Technology Platform<br><br>
             © {datetime.now().year} DentEdTech<br>All rights reserved<br><br>
