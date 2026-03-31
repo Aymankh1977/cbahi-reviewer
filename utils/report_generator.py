@@ -1,6 +1,6 @@
 # utils/report_generator.py
 # Downloadable HTML Report Generator
-# DentEdTech™ — CBAHI Reviewer Platform
+# DentEdTech — CBAHI Reviewer Platform
 
 from datetime import datetime
 
@@ -170,7 +170,7 @@ def generate_html_report(result: dict, facility: dict, program: str) -> str:
 <body>
 
 <div class="header">
-  <div class="header-brand">CBAHI Reviewer — DentEdTech™</div>
+  <div class="header-brand">CBAHI Reviewer — DentEdTech</div>
   <div class="header-title">CBAHI Compliance Report</div>
   <div class="header-sub">{facility.get('name','')} · {program_names.get(program, program)}</div>
   <div class="header-meta">
@@ -260,14 +260,455 @@ def generate_html_report(result: dict, facility: dict, program: str) -> str:
 
 <div class="footer">
   <div>
-    <div class="footer-brand">CBAHI Reviewer — DentEdTech™</div>
+    <div class="footer-brand">CBAHI Reviewer — DentEdTech</div>
     <div class="disclaimer">This report is AI-generated for accreditation preparation purposes only. It does not constitute an official CBAHI survey or guarantee any accreditation outcome. Always consult official CBAHI guidelines and engage certified surveyors for formal preparation.</div>
   </div>
   <div style="text-align:right;">
-    <div>© {datetime.now().year} DentEdTech. All rights reserved.</div>
+    <div>© 2026 DentEdTech. All rights reserved.</div>
     <div style="margin-top:4px;">CBAHI® is a registered trademark of the Saudi Central Board for Accreditation of Healthcare Institutions.</div>
   </div>
 </div>
 
 </body>
 </html>"""
+
+
+def generate_pdf_report(result: dict, facility: dict, program: str) -> bytes:
+    """Generate a print-ready PDF compliance report using ReportLab."""
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, KeepTogether, PageBreak
+    )
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
+    from reportlab.platypus import Flowable
+    import io
+
+    # ── Palette ──────────────────────────────────────────────────────────
+    GOLD      = colors.HexColor("#C9A84C")
+    DARK_NAVY = colors.HexColor("#0A0E1A")
+    NAVY      = colors.HexColor("#131C35")
+    NAVY_MID  = colors.HexColor("#1E2D50")
+    GREEN     = colors.HexColor("#00C97B")
+    RED       = colors.HexColor("#FF4D6D")
+    BLUE      = colors.HexColor("#3D7FFF")
+    TEAL      = colors.HexColor("#00C9B1")
+    GREY      = colors.HexColor("#F4F6FB")
+    MID_GREY  = colors.HexColor("#8896B3")
+    TEXT      = colors.HexColor("#1A1A2E")
+    WHITE     = colors.white
+    BORDER    = colors.HexColor("#E0E4EE")
+
+    PAGE_W, PAGE_H = A4
+    MARGIN = 2.0 * cm
+    CW = PAGE_W - 2 * MARGIN
+
+    # ── Score helpers ─────────────────────────────────────────────────────
+    def scol(s):
+        s = int(s or 0)
+        if s >= 85: return GREEN
+        if s >= 70: return BLUE
+        if s >= 50: return GOLD
+        return RED
+
+    def dcol(decision, score):
+        d = decision.lower()
+        if "accredited" in d and "conditional" not in d and "denied" not in d: return GREEN
+        if "conditional" in d: return GOLD
+        if "denied" in d: return RED
+        return scol(score)
+
+    # ── Styles ────────────────────────────────────────────────────────────
+    def st(name, **kw):
+        defaults = dict(fontName="Helvetica", fontSize=10, textColor=TEXT,
+                        spaceBefore=3, spaceAfter=3, leading=14)
+        defaults.update(kw)
+        return ParagraphStyle(name, **defaults)
+
+    S = {
+        "h1":   st("h1", fontName="Helvetica-Bold", fontSize=18, textColor=DARK_NAVY,
+                   spaceBefore=14, spaceAfter=6, leading=24),
+        "h2":   st("h2", fontName="Helvetica-Bold", fontSize=13, textColor=DARK_NAVY,
+                   spaceBefore=10, spaceAfter=5, leading=18),
+        "h3":   st("h3", fontName="Helvetica-Bold", fontSize=10.5, textColor=NAVY_MID,
+                   spaceBefore=7, spaceAfter=3, leading=15),
+        "body": st("body", alignment=TA_JUSTIFY),
+        "sm":   st("sm", fontSize=9, leading=13),
+        "cap":  st("cap", fontName="Helvetica-Oblique", fontSize=8,
+                   textColor=MID_GREY, alignment=TA_CENTER),
+        "mono": st("mono", fontName="Courier", fontSize=8.5,
+                   textColor=DARK_NAVY, backColor=GREY),
+        "ctr":  st("ctr", alignment=TA_CENTER),
+    }
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+    def hr():
+        return HRFlowable(width="100%", thickness=1, color=GOLD,
+                          spaceBefore=4*mm, spaceAfter=4*mm)
+
+    def pill(text, bg, tc=WHITE):
+        d = [[Paragraph(text, ParagraphStyle("p", fontName="Helvetica-Bold",
+                  fontSize=8, textColor=tc, alignment=TA_CENTER))]]
+        t = Table(d, colWidths=[24*mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0),(-1,-1), bg),
+            ("TOPPADDING", (0,0),(-1,-1), 3),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
+            ("ROUNDEDCORNERS",[4]),
+        ]))
+        return t
+
+    def section(title, icon=""):
+        return [
+            Spacer(1, 4*mm),
+            HRFlowable(width="100%", thickness=1.5, color=GOLD, spaceAfter=2*mm),
+            Paragraph(f"{icon}  {title}".strip(), S["h1"]),
+            Spacer(1, 2*mm),
+        ]
+
+    def tbl(rows, headers, widths=None):
+        data = [[Paragraph(f"<b>{h}</b>",
+                    ParagraphStyle("th", fontName="Helvetica-Bold",
+                    fontSize=8.5, textColor=WHITE)) for h in headers]]
+        for row in rows:
+            data.append([Paragraph(str(c), S["sm"]) for c in row])
+        w = widths or [CW / len(headers)] * len(headers)
+        t = Table(data, colWidths=w)
+        t.setStyle(TableStyle([
+            ("BACKGROUND",    (0,0),(-1,0), DARK_NAVY),
+            ("ROWBACKGROUNDS",(0,1),(-1,-1), [GREY, WHITE]),
+            ("GRID",          (0,0),(-1,-1), 0.3, BORDER),
+            ("TOPPADDING",    (0,0),(-1,-1), 5),
+            ("BOTTOMPADDING", (0,0),(-1,-1), 5),
+            ("LEFTPADDING",   (0,0),(-1,-1), 7),
+            ("VALIGN",        (0,0),(-1,-1), "MIDDLE"),
+        ]))
+        return t
+
+    def info(text, border=GOLD, bg=None):
+        if bg is None:
+            bg = colors.HexColor("#FFFBE8")
+        d = [[Paragraph(text, S["sm"])]]
+        t = Table(d, colWidths=[CW])
+        t.setStyle(TableStyle([
+            ("BACKGROUND",   (0,0),(-1,-1), bg),
+            ("LINEABOVE",    (0,0),(-1,0),  2, border),
+            ("LEFTPADDING",  (0,0),(-1,-1), 10),
+            ("RIGHTPADDING", (0,0),(-1,-1), 10),
+            ("TOPPADDING",   (0,0),(-1,-1), 7),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 7),
+        ]))
+        return t
+
+    def bul(text):
+        return Paragraph(f"\u2022  {text}",
+            ParagraphStyle("b", parent=S["body"], leftIndent=12))
+
+    # ── Page callbacks ────────────────────────────────────────────────────
+    score    = int(result.get("overall_score", 0) or 0)
+    decision = result.get("decision", "Unknown")
+    DC       = dcol(decision, score)
+    prog_names = {"ambulatory":"Ambulatory Care Center",
+                  "phc":"Primary Healthcare Center",
+                  "hospital":"Hospital"}
+    prog_label = prog_names.get(program, program)
+
+    def on_first(canvas, doc):
+        w, h = A4
+        canvas.saveState()
+        canvas.setFillColor(DARK_NAVY)
+        canvas.rect(0, 0, w, h, fill=1, stroke=0)
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, h-8*mm, w, 8*mm, fill=1, stroke=0)
+        canvas.rect(0, 0, w, 4*mm, fill=1, stroke=0)
+        canvas.setFillColor(colors.HexColor("#0F1628"))
+        canvas.rect(0, 0, 18*mm, h-8*mm, fill=1, stroke=0)
+        canvas.setFillColor(GOLD)
+        canvas.rect(16*mm, 0, 2*mm, h-8*mm, fill=1, stroke=0)
+        # Logo
+        canvas.setFillColor(GOLD)
+        canvas.roundRect(MARGIN+18*mm, h-76*mm, 22*mm, 22*mm, 5, fill=1, stroke=0)
+        canvas.setFillColor(DARK_NAVY)
+        canvas.setFont("Helvetica-Bold", 14)
+        canvas.drawCentredString(MARGIN+18*mm+11*mm, h-68*mm, "CR")
+        # Title
+        canvas.setFillColor(GOLD)
+        canvas.setFont("Helvetica-Bold", 32)
+        canvas.drawString(MARGIN+18*mm, h-108*mm, "CBAHI Compliance Report")
+        # Facility
+        canvas.setFillColor(WHITE)
+        canvas.setFont("Helvetica-Bold", 16)
+        canvas.drawString(MARGIN+18*mm, h-120*mm, facility.get("name",""))
+        # Rule
+        canvas.setStrokeColor(GOLD); canvas.setLineWidth(1)
+        canvas.line(MARGIN+18*mm, h-127*mm, w-MARGIN, h-127*mm)
+        # Meta grid
+        meta = [
+            ("Program",      prog_label),
+            ("Survey Type",  facility.get("survey_type","Initial Survey")),
+            ("City",         facility.get("city","KSA")),
+            ("Generated",    datetime.now().strftime("%d %B %Y")),
+        ]
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.setFillColor(GOLD)
+        for i, (k, v) in enumerate(meta):
+            mx = MARGIN+18*mm + i*43*mm
+            canvas.drawString(mx, h-137*mm, k.upper())
+        canvas.setFont("Helvetica", 9)
+        canvas.setFillColor(WHITE)
+        for i, (k, v) in enumerate(meta):
+            mx = MARGIN+18*mm + i*43*mm
+            canvas.drawString(mx, h-145*mm, v[:20])
+        # Big score
+        canvas.setFillColor(DC)
+        canvas.setFont("Helvetica-Bold", 72)
+        canvas.drawString(MARGIN+18*mm, h-200*mm, f"{score}%")
+        canvas.setFont("Helvetica-Bold", 22)
+        canvas.drawString(MARGIN+18*mm, h-213*mm, decision)
+        canvas.setFont("Helvetica", 10)
+        canvas.setFillColor(MID_GREY)
+        canvas.drawString(MARGIN+18*mm, h-222*mm,
+            f"AI Confidence: {result.get('confidence','High')}")
+        # Brand footer
+        canvas.setFillColor(GOLD)
+        canvas.setFont("Helvetica-Bold", 12)
+        canvas.drawString(MARGIN+18*mm, 36*mm, "DentEdTech")
+        canvas.setFillColor(MID_GREY)
+        canvas.setFont("Helvetica", 9)
+        canvas.drawString(MARGIN+18*mm, 28*mm, "© 2026 DentEdTech. All rights reserved.")
+        canvas.drawString(MARGIN+18*mm, 20*mm,
+            "AI-generated report for accreditation preparation. Not an official CBAHI survey.")
+        canvas.restoreState()
+
+    def on_later(canvas, doc):
+        w, h = A4
+        canvas.saveState()
+        canvas.setFillColor(DARK_NAVY)
+        canvas.rect(0, h-14*mm, w, 14*mm, fill=1, stroke=0)
+        canvas.setFillColor(GOLD)
+        canvas.rect(0, h-15.5*mm, w, 1.5*mm, fill=1, stroke=0)
+        canvas.setFillColor(GOLD)
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawString(MARGIN, h-9.5*mm, "CBAHI Compliance Report")
+        canvas.setFillColor(WHITE)
+        canvas.setFont("Helvetica-Bold", 8)
+        canvas.drawCentredString(w/2, h-9.5*mm, facility.get("name",""))
+        canvas.setFillColor(MID_GREY)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(w-MARGIN, h-9.5*mm, "DentEdTech")
+        canvas.setStrokeColor(GOLD); canvas.setLineWidth(0.5)
+        canvas.line(MARGIN, 14*mm, w-MARGIN, 14*mm)
+        canvas.setFillColor(MID_GREY)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawString(MARGIN, 9*mm, "AI-generated. Not an official CBAHI survey.")
+        canvas.drawRightString(w-MARGIN, 9*mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    # ── Build story ───────────────────────────────────────────────────────
+    buf  = io.BytesIO()
+    doc  = SimpleDocTemplate(buf, pagesize=A4,
+               leftMargin=MARGIN, rightMargin=MARGIN,
+               topMargin=2.8*cm, bottomMargin=2.2*cm,
+               title=f"CBAHI Report — {facility.get('name','')}",
+               author="DentEdTech")
+    story = []
+    story.append(Spacer(1, 1))   # cover drawn by on_first callback
+
+    met_esrs   = sum(1 for e in result.get("esr_status",[]) if e.get("met") is True)
+    total_esrs = len(result.get("esr_status",[]))
+    ready      = result.get("survey_readiness",{}).get("ready_to_survey", False)
+    readiness  = result.get("survey_readiness",{}).get("estimated_readiness","TBD")
+
+    # ── Executive Summary ──────────────────────────────────────────────────
+    story.append(PageBreak())
+    story += section("Executive Summary", "")
+
+    # KPI cards row
+    kpis = [
+        (f"{score}%",       "Overall Score",  DC),
+        (f"{met_esrs}/{total_esrs}", "ESRs Met",
+            GREEN if met_esrs==total_esrs else RED),
+        (str(len([g for g in result.get("critical_gaps",[])
+                  if g.get("impact")=="Critical"])), "Critical Gaps", RED),
+        ("READY" if ready else "NOT YET", "Survey Ready",
+            GREEN if ready else RED),
+        (readiness, "Est. Readiness", GOLD),
+    ]
+    kpi_data = [[
+        Paragraph(f"<b>{v}</b>",
+            ParagraphStyle("kv", fontName="Helvetica-Bold", fontSize=12,
+                textColor=c, alignment=TA_CENTER)),
+        Paragraph(k, ParagraphStyle("kl", fontName="Helvetica", fontSize=7.5,
+            textColor=MID_GREY, alignment=TA_CENTER))
+    ] for v, k, c in kpis]
+    # render as a 5-col table
+    row1 = [kpi_data[i][0] for i in range(5)]
+    row2 = [kpi_data[i][1] for i in range(5)]
+    kpi_t = Table([row1, row2], colWidths=[CW/5]*5)
+    kpi_t.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0),(-1,-1), NAVY),
+        ("TOPPADDING",   (0,0),(-1,0), 10),
+        ("BOTTOMPADDING",(0,-1),(-1,-1), 8),
+        ("TOPPADDING",   (0,1),(-1,1), 2),
+        ("LINEBELOW",    (0,0),(-1,0), 0.3, BORDER),
+        ("GRID",         (0,0),(-1,-1), 0.3, BORDER),
+        ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
+    ]))
+    story.append(kpi_t)
+    story.append(Spacer(1, 4*mm))
+    story.append(Paragraph(result.get("executive_summary",""), S["body"]))
+
+    # Strengths
+    strengths = result.get("strengths", [])
+    if strengths:
+        story += section("Identified Strengths", "")
+        for s_item in strengths:
+            story.append(bul(s_item))
+
+    # ── Chapter Scores ─────────────────────────────────────────────────────
+    story += section("Chapter-by-Chapter Compliance", "")
+    ch_rows = []
+    for ch in result.get("chapter_scores", []):
+        sc = int(ch.get("score", 0) or 0)
+        col = scol(sc)
+        ch_rows.append([
+            ch.get("code",""), ch.get("name",""),
+            f"{sc}%", ch.get("status",""), ch.get("notes","")
+        ])
+    if ch_rows:
+        story.append(tbl(ch_rows,
+            ["Code","Chapter","Score","Status","Notes"],
+            widths=[14*mm, 50*mm, 16*mm, 22*mm, CW-102*mm]))
+
+    # ── ESR Status ─────────────────────────────────────────────────────────
+    story += section("Essential Safety Requirements", "")
+    story.append(info(
+        "All ESRs must be fully met for Accreditation to be granted. "
+        "Any ESR marked Not Met must be resolved before the official survey.",
+        border=RED, bg=colors.HexColor("#FFF0F3")))
+    story.append(Spacer(1, 3*mm))
+    esr_rows = []
+    for e in result.get("esr_status", []):
+        met = e.get("met")
+        status = "Met" if met is True else "Not Met" if met is False else "Unclear"
+        esr_rows.append([e.get("code",""), e.get("name",""), status, e.get("notes","")])
+    if esr_rows:
+        story.append(tbl(esr_rows,
+            ["Code","Requirement","Status","Notes"],
+            widths=[16*mm, 52*mm, 18*mm, CW-86*mm]))
+
+    # ── Critical Gaps ──────────────────────────────────────────────────────
+    gaps = result.get("critical_gaps", [])
+    if gaps:
+        story += section("Critical Gaps Identified", "")
+        for g in gaps:
+            impact = g.get("impact","Medium")
+            ic = RED if impact=="Critical" else GOLD if impact=="High" else BLUE
+            story.append(KeepTogether([
+                Table([[
+                    Paragraph(f"<b>{g.get('standard','')}</b>",
+                        ParagraphStyle("gc", fontName="Helvetica-Bold",
+                            fontSize=9, textColor=GOLD)),
+                    Paragraph(impact,
+                        ParagraphStyle("gi", fontName="Helvetica-Bold",
+                            fontSize=8, textColor=ic, alignment=TA_RIGHT)),
+                ]], colWidths=[CW*0.7, CW*0.3]),
+                Paragraph(f"<b>{g.get('issue','')}</b>", S["h3"]),
+                Paragraph(f"Recommendation: {g.get('recommendation','')}", S["sm"]),
+                Spacer(1, 3*mm),
+                HRFlowable(width="100%", thickness=0.3, color=BORDER, spaceAfter=2*mm),
+            ]))
+
+    # ── Missing Documents ──────────────────────────────────────────────────
+    missing = result.get("missing_documents", [])
+    if missing:
+        story += section("Missing Documentation", "")
+        for d_item in missing:
+            story.append(bul(d_item))
+
+    # ── Recommendations ────────────────────────────────────────────────────
+    recs = result.get("recommendations", [])
+    if recs:
+        story += section("Prioritised Recommendations", "")
+        for r in recs:
+            p  = r.get("priority","Suggested")
+            pc = RED if p=="Critical" else GOLD if p=="Important" else BLUE
+            bg = colors.HexColor("#FFF5F5") if p=="Critical" else                  colors.HexColor("#FFFBE8") if p=="Important" else                  colors.HexColor("#F0F4FF")
+            stds = " · ".join(r.get("standards",[]))
+            body_parts = [
+                Paragraph(f"<b>{p} — {r.get('title','')}</b>  |  {r.get('timeline','')}",
+                    ParagraphStyle("rh", fontName="Helvetica-Bold", fontSize=10,
+                        textColor=pc)),
+                Paragraph(r.get("description",""), S["sm"]),
+            ]
+            if stds:
+                body_parts.append(Paragraph(stds,
+                    ParagraphStyle("rs", fontName="Courier", fontSize=8,
+                        textColor=MID_GREY)))
+            card_data = [[body_parts]]
+            card = Table(card_data, colWidths=[CW])
+            card.setStyle(TableStyle([
+                ("BACKGROUND",   (0,0),(-1,-1), bg),
+                ("LINEBEFORE",   (0,0),(0,-1),  3, pc),
+                ("LEFTPADDING",  (0,0),(-1,-1), 10),
+                ("RIGHTPADDING", (0,0),(-1,-1), 8),
+                ("TOPPADDING",   (0,0),(-1,-1), 7),
+                ("BOTTOMPADDING",(0,0),(-1,-1), 7),
+            ]))
+            story.append(card)
+            story.append(Spacer(1, 3*mm))
+
+    # ── Action Plan ────────────────────────────────────────────────────────
+    ap = result.get("action_plan", {})
+    if ap:
+        story += section("Corrective Action Plan", "")
+        for key, icon, col in [("phase1","Phase 1 — 0 to 30 days",RED),
+                                ("phase2","Phase 2 — 30 to 90 days",GOLD),
+                                ("phase3","Phase 3 — 90 to 180 days",GREEN)]:
+            phase = ap.get(key, {})
+            if not phase: continue
+            story.append(KeepTogether([
+                Paragraph(f"<b>{icon}: {phase.get('title','')}</b>",
+                    ParagraphStyle("ph", fontName="Helvetica-Bold",
+                        fontSize=10.5, textColor=col, spaceBefore=6)),
+                Paragraph(phase.get("description",""), S["sm"]),
+                *[bul(t) for t in phase.get("tasks",[])],
+                Spacer(1, 3*mm),
+            ]))
+
+    # ── Survey Readiness ───────────────────────────────────────────────────
+    sr = result.get("survey_readiness", {})
+    if sr:
+        story += section("Survey Readiness", "")
+        rc = GREEN if ready else RED
+        story.append(info(
+            f"{'READY FOR SURVEY' if ready else 'NOT YET READY FOR SURVEY'}  |  "
+            f"Estimated readiness: {readiness}",
+            border=rc,
+            bg=colors.HexColor("#E8FFF4") if ready else colors.HexColor("#FFF0F3")))
+        story.append(Spacer(1, 3*mm))
+        for risk in sr.get("key_risks", []):
+            story.append(bul(risk))
+
+    # ── Footer page ────────────────────────────────────────────────────────
+    story.append(PageBreak())
+    story.append(Spacer(1, 60*mm))
+    story.append(HRFlowable(width="100%", thickness=1, color=GOLD,
+                             spaceBefore=4*mm, spaceAfter=6*mm))
+    story.append(Paragraph("DentEdTech — CBAHI Reviewer",
+        ParagraphStyle("fb", fontName="Helvetica-Bold", fontSize=13,
+            textColor=DARK_NAVY, alignment=TA_CENTER, spaceAfter=4)))
+    story.append(Paragraph(
+        "© 2026 DentEdTech. All rights reserved. "
+        "This report is AI-generated for accreditation preparation purposes only. "
+        "It does not constitute an official CBAHI survey or guarantee any accreditation outcome. "
+        "CBAHI is a registered trademark of the Saudi Central Board for Accreditation of Healthcare Institutions.",
+        ParagraphStyle("fd", fontName="Helvetica", fontSize=8,
+            textColor=MID_GREY, alignment=TA_CENTER, leading=12)))
+
+    doc.build(story, onFirstPage=on_first, onLaterPages=on_later)
+    buf.seek(0)
+    return buf.read()
